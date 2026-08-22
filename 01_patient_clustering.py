@@ -6,6 +6,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
 from sklearn.impute import SimpleImputer
+from sklearn.ensemble import IsolationForest
 
 # Set plotting style
 sns.set_theme(style="whitegrid")
@@ -52,6 +53,45 @@ def build_patient_clusters(df_scaled, n_clusters=4):
     print("Clustering complete.\n")
     return cluster_labels, kmeans
 
+def find_optimal_clusters(df_scaled, max_k=10):
+    """Uses the Elbow Method to find the optimal number of clusters."""
+    print("--- Calculating Optimal Cluster Count (Elbow Method) ---")
+    wcss = [] # Within-Cluster Sum of Squares (how tight the clusters are)
+    
+    for i in range(1, max_k + 1):
+        kmeans = KMeans(n_clusters=i, random_state=42, n_init=10)
+        kmeans.fit(df_scaled)
+        wcss.append(kmeans.inertia_)
+        
+    # Plot the Elbow Curve
+    plt.figure(figsize=(8, 5))
+    plt.plot(range(1, max_k + 1), wcss, marker='o', linestyle='--')
+    plt.title('The Elbow Method (Look for the "bend")')
+    plt.xlabel('Number of Clusters (k)')
+    plt.ylabel('WCSS (Inertia)')
+    plt.show()
+
+def detect_critical_anomalies(df_scaled, raw_data):
+    """Uses Isolation Forest to flag severe patient anomalies."""
+    print("--- Running Isolation Forest for Outlier Detection ---")
+    # contamination=0.05 means we assume roughly 5% of patients are severe anomalies
+    iso_forest = IsolationForest(contamination=0.05, random_state=42)
+    
+    # Predict returns 1 for normal, -1 for anomaly
+    anomaly_labels = iso_forest.fit_predict(df_scaled)
+    
+    # Add back to our raw data dataframe
+    raw_data['Is_Anomaly'] = anomaly_labels
+    
+    # Filter and show just the anomalies
+    anomalies = raw_data[raw_data['Is_Anomaly'] == -1]
+    print(f"Detected {len(anomalies)} critical patients.")
+    print(anomalies.head())
+    return raw_data
+
+
+
+
 def visualize_clinical_clusters(df_scaled, cluster_labels):
     """Reduces multidimensional data to 2D using PCA and plots the clusters."""
     print("--- 4. Visualizing the Results ---")
@@ -81,21 +121,23 @@ def visualize_clinical_clusters(df_scaled, cluster_labels):
     plt.show()
 
 if __name__ == "__main__":
-    # The Pipeline Execution
-    # 1. Load
+    # 1. Load & Clean
     raw_data = ingest_and_clean_data()
     
     # 2. Scale
     scaled_data = scale_patient_features(raw_data)
     
-    # 3. Cluster
-    # We choose 4 clusters (e.g., Healthy, At-Risk, Chronic, Critical)
-    labels, model = build_patient_clusters(scaled_data, n_clusters=4)
+    # --- NEW: Find the best K ---
+    # The code will pause and show you a graph. Close the graph to continue.
+    # Look at where the line sharply bends (the "elbow"). That is your optimal K.
+    find_optimal_clusters(scaled_data, max_k=10)
     
-    # Add the labels back to our original readable data to see who is in which group
+    # 3. Cluster (Change n_clusters to whatever the elbow graph suggested, e.g., 3 or 4)
+    labels, model = build_patient_clusters(scaled_data, n_clusters=4)
     raw_data['Risk_Cluster'] = labels
-    print("Sample of clustered patients:")
-    print(raw_data.head())
+    
+    # --- NEW: Detect Anomalies ---
+    raw_data = detect_critical_anomalies(scaled_data, raw_data)
     
     # 4. Visualize
     visualize_clinical_clusters(scaled_data, labels)
